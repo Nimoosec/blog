@@ -4,7 +4,7 @@ title:  "PyExp Writeup"
 date:   2022-07-16 08:11:30 +0530
 ---
 
-# Walkthrough of Exhost
+# Walkthrough of Pyexp
 
 Hello everyone, in this post I'm sharing `offsec` play grounds `warm-up` machine called `PyExp`. Which teachs about  wordlist attacks, hash cracking and privilege escalation with some  
 
